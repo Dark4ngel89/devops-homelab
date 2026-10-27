@@ -1,0 +1,33 @@
+# Secrets: nu ajung niciodată în Git
+.env
+.env.*
+*.pem
+*.key
+*.crt
+kubeconfig*
+*.kubeconfig
+.vault_pass*
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ansible
+*.retry
+
+# Helm
+charts/*/charts/
+*.tgz
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

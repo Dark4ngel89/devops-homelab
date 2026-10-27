@@ -1,0 +1,3 @@
+# Toate fișierele text cu LF, indiferent de unde sunt editate (Windows sau Linux).
+# Shell scripts și YAML cu CRLF se strică în containere și în Ansible.
+* text=auto eol=lf
