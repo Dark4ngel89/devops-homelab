@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: app
@@ -45,7 +45,7 @@ jobs:
 
   build:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write # doar acest job poate publica în GHCR
