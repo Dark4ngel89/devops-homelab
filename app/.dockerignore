@@ -1,0 +1,12 @@
+# Ce NU trimitem în build context (mai rapid, imagine mai mică, fără scurgeri de fișiere locale)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+requirements-dev.txt
+pytest.ini
+Dockerfile
+.dockerignore
+.env
+.env.*

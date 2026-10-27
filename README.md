@@ -41,7 +41,7 @@ flowchart LR
 
 - [x] 0. Mediul: WSL2, Hyper-V, Docker, kubectl, Helm, gh, Ansible
 - [x] 1. Fundația: repo, structură, README
-- [ ] 2. Aplicația + Dockerfile
+- [x] 2. Aplicația + Dockerfile
 - [ ] 3. GitHub Actions → GHCR
 - [ ] 4. K3S + manifeste scrise de mână
 - [ ] 5. Helm chart
@@ -66,7 +66,20 @@ flowchart LR
 - **Email noreply GitHub** în `git config`, ca adresa reală să nu apară în istoricul unui repo public.
 - **Git nu urmărește foldere goale**, de aceea fiecare folder are un `.gitkeep` până primește conținut.
 
+### Faza 2: Aplicația și imaginea Docker
+- **Cardinality în Prometheus:** label-ul `path` folosește template-ul rutei, iar tot ce nu e rută (404) intră sub `unmatched`. Altfel fiecare URL random ar crea o serie nouă. Un test protejează comportamentul ăsta.
+- **Trafic străin pe `localhost:8000`:** în log-uri apăreau request-uri `GET /api/state` pe care nu le-am făcut eu. Un proces de pe Windows apela portul, iar WSL2 redirecționează `localhost`. Din WSL toate conexiunile apar ca `127.0.0.1`; procesul se află din Windows cu `Get-NetTCPConnection -RemotePort 8000`.
+- **`prometheus-client` ține metricile în memoria procesului:** un singur worker uvicorn per container, scalez cu `replicas`.
+- **Warning-urile de deprecation contează:** `httpx` cu `TestClient` era deprecated, l-am înlocuit cu `httpx2`. Warning-ul de azi e eroarea de după următorul upgrade.
+- **Layer caching:** `requirements.txt` copiat înaintea codului, deci o modificare în `main.py` nu reinstalează dependențele. Build: 19.9s la rece, 2.5s cu cache (`CACHED` la `pip install`).
+- **Multi-stage build:** la această aplicație câștigul e mic (wheels precompilate), dar pattern-ul contează când apar dependențe care compilează C.
+- **Non-root cu UID numeric** (`USER 10001`), pentru că `runAsNonRoot` din Kubernetes verifică doar UID numeric. Verificat cu `docker exec ... id`.
+- **Exec form la `CMD`:** `docker logs` arată `Started server process [1]`, adică uvicorn e PID 1 și primește direct `SIGTERM`.
+- **`PYTHONUNBUFFERED=1`:** log-urile ajung imediat la `docker logs` / `kubectl logs`.
+- **Mărimea imaginii:** `DISK USAGE` 222 MB (dezarhivat, local) vs `CONTENT SIZE` 53 MB (layere comprimate, cât se transferă la push/pull).
+
 ## Greșeli făcute
 
 - **`wsl --install` a instalat doar platforma, nu și distribuția.** După restart, `wsl -l -v` arăta "no installed distributions". Diagnostic: `wsl --version` (platforma OK), `wsl --list --online` (catalogul OK), deci lipsea doar distro-ul. Fix: `wsl --install -d Ubuntu-24.04`. Lecție: verifici fiecare componentă separat, nu doar exit code-ul installer-ului.
 - **Primele comenzi le-am rulat din `/mnt/c/WINDOWS/system32`** (unde deschide WSL implicit din PowerShell admin). Am trecut în `~` înainte să apară probleme de permisiuni sau performanță.
+- **`git checkout main.py` pe un fișier necomis:** după testul de cache am vrut să anulez linia adăugată, dar am primit `pathspec 'main.py' did not match any file(s) known to git`. Git poate restaura doar ce a văzut într-un commit, iar codul Fazei 2 nu era comis încă. Fix: am șters linia manual (`sed -i '$ d' main.py`). Lecție: commit des, înainte de experimente.
