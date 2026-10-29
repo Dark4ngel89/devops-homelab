@@ -1,0 +1,8 @@
+# Fișiere care nu intră în pachetul chart-ului (helm package)
+.git/
+.gitignore
+*.swp
+*.bak
+*.tmp
+.vscode/
+.idea/

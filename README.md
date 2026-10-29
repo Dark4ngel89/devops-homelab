@@ -45,7 +45,7 @@ flowchart LR
 - [x] 2. Aplicația + Dockerfile
 - [x] 3. GitHub Actions → GHCR
 - [x] 4. K3S + manifeste scrise de mână
-- [ ] 5. Helm chart
+- [x] 5. Helm chart
 - [ ] 6. ArgoCD (GitOps, auto-sync, self-heal)
 - [ ] 7. Monitoring (kube-prometheus-stack, ServiceMonitor, dashboard, alertă)
 - [ ] 8. Ansible: provisioning VM + K3S
@@ -118,6 +118,24 @@ flowchart LR
 - **Service:** IP și DNS stabile peste pod-uri efemere. EndpointSlice = lista pod-urilor Ready. Load balancing-ul e aleator (3 la 1 pe 4 request-uri), nu round-robin.
 - **IP-ul clientului se pierde la NodePort** (`10.42.0.1` în log-uri, SNAT). Se păstrează cu `externalTrafficPolicy: Local`.
 
+### Faza 5: Helm
+- **Chart = template-uri + `values.yaml`.** `version` (chart-ul) și `appVersion` (aplicația) sunt independente. Am crescut `version` la 0.2.0 când am schimbat template-ul.
+- **Precedența valorilor:** `values.yaml` < `-f fișier` (ultimul câștigă) < `--set`. `helm get values --all` arată valorile calculate efectiv.
+- **`_helpers.tpl`:** nume și label-uri reutilizabile. Selectorul conține `name` + `instance`, ca două release-uri în același namespace să nu-și ia pod-urile unul altuia.
+- **Indentarea e sursa principală de bug-uri în template-uri** (`{{-`, `nindent`, `toYaml`). Unealta de debug: `helm template` (opțional `-s templates/x.yaml`).
+- **`helm lint` verifică chart-ul; `--dry-run=server` îl verifică față de cluster.** Lint-ul a trecut, dar dry-run-ul a arătat că selectorul nu se poate schimba pe Deployment-ul manual.
+- **Diff-ul pe text la YAML e zgomotos** (comentarii, ordinea cheilor sortată de `toYaml`, stilul listelor). Unelte semantice: `kubectl diff`, `helm diff`, `dyff`, ArgoCD.
+- **Helm nu preia resurse pe care nu le-a creat** (`invalid ownership metadata`): îi lipsesc label-ul `managed-by=Helm` și annotations `meta.helm.sh/release-*`. Adopția (label + annotations) merge doar dacă resursele generate sunt compatibile; aici nu era cazul (selector imuabil), așa că am recreat resursele. Fără downtime s-ar face blue/green cu alt nume de release.
+- **Install-ul eșuat nu a lăsat nimic în urmă:** Helm verifică ownership-ul înainte să creeze resurse. Starea release-urilor e în Secrets `sh.helm.release.v1.<nume>.v<N>`.
+- **Helm 4 față de Helm 3:** `helm list` arată implicit toate stările (`-a` nu mai există), `--atomic` a devenit `--rollback-on-failure`, server-side apply e implicit, `--wait` are strategii, iar implicit e `hookOnly` (nu așteaptă pod-urile Ready). În CI folosesc mereu `--wait`.
+- **Namespace-ul nu e în chart** (`-n homelab` la install), ca ștergerea release-ului să nu șteargă namespace-ul.
+- **Ingress prin Traefik + nip.io** (`app.192.168.100.10.nip.io`), Service `ClusterIP`. `automountServiceAccountToken: false` pe pod.
+- **Rollback-ul creează o revizie nouă** (`Rollback to 1`), nu șterge istoria. Kubernetes refolosește ReplicaSet-ul vechi, deci e rapid.
+- **`APP VERSION` din `helm history` arată `appVersion` din Chart.yaml, nu imaginea care rulează.** Imaginea reală o văd cu `kubectl get deploy -o wide`.
+- **Rolling update: ambele versiuni rulează simultan**, deci versiunea nouă trebuie să fie compatibilă înapoi (API, schema DB).
+- **Race condition la oprirea pod-urilor.** SIGTERM-ul și scoaterea pod-ului din EndpointSlice se întâmplă în paralel, deci Traefik mai trimite câteva request-uri spre un pod deja oprit (`Bad Gateway`, timeout). `maxUnavailable: 0` și readiness protejează doar pornirea. Fix: `preStop: sleep: seconds: 5` (acțiune nativă Kubernetes, fără binarul `sleep` în imagine) + `terminationGracePeriodSeconds: 30`. Confirmat cu o buclă de `curl` la 0.5s în timpul upgrade-ului și rollback-ului: zero erori.
+- **Drift:** un `--set` există doar în comanda cuiva, nu în Git. E problema pe care o rezolvă GitOps (Faza 6).
+
 ## Greșeli făcute
 
 - **`wsl --install` a instalat doar platforma, nu și distribuția.** După restart, `wsl -l -v` arăta "no installed distributions". Diagnostic: `wsl --version` (platforma OK), `wsl --list --online` (catalogul OK), deci lipsea doar distro-ul. Fix: `wsl --install -d Ubuntu-24.04`. Lecție: verifici fiecare componentă separat, nu doar exit code-ul installer-ului.
@@ -129,4 +147,6 @@ flowchart LR
 - **Am acceptat fingerprint-ul SSH (TOFU) fără verificare**, apoi am rulat verificarea în WSL în loc de VM. Corect: verifici în consola serverului, înainte de `yes`.
 - **`scp` într-un folder inexistent (`~/.kube`)** a eșuat, dar `&&` a împiedicat `rm`-ul de pe VM. Pașii distructivi se leagă cu `&&` (sau `set -e`).
 - **Am testat persistența forwarding-ului doar cu `wsl --shutdown`.** După restartul Windows, WSL nu mai ajungea la VM. Diagnostic: `Get-NetIPInterface` arăta `Forwarding: Disabled` doar pe adaptorul WSL (recreat la boot). Rezolvat cu WSL mirrored networking.
+- **Am presupus că rolling update-ul cu `maxUnavailable: 0` înseamnă zero downtime.** Bucla de `curl` a arătat 2 erori (`Bad Gateway`, timeout) atât la upgrade, cât și la rollback. Cauza: race condition la oprirea pod-urilor. Rezolvat cu `preStop` sleep și reconfirmat cu același test. Lecție: un fix e confirmat doar când testul care arăta problema nu o mai arată.
+- **`helm list -a` din Helm 3 nu mai există în Helm 4.** Am citit `--help`-ul versiunii instalate în loc să mă bazez pe memorie.
 - **Comandă cu ghilimea neînchisă** a lăsat shell-ul în prompt-ul `>` (PS2). Ctrl+C și rescriere.

@@ -1,0 +1,8 @@
+apiVersion: v2
+name: homelab-app
+description: FastAPI app din DevOps home lab (/health, /metrics)
+type: application
+# Versiunea chart-ului: se schimbă când se schimbă template-urile sau values.
+version: 0.2.0
+# Versiunea aplicației: tag-ul imaginii folosit implicit (suprascris de image.tag).
+appVersion: "sha-ea0bf3f"

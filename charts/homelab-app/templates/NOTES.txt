@@ -1,0 +1,7 @@
+{{ include "homelab-app.fullname" . }} rulează imaginea {{ .Values.image.repository }}:{{ include "homelab-app.imageTag" . }} în namespace-ul {{ .Release.Namespace }}.
+
+Verificare:
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "homelab-app.fullname" . }}
+{{- if .Values.ingress.enabled }}
+  curl http://{{ .Values.ingress.host }}/
+{{- end }}
