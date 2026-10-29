@@ -24,14 +24,15 @@ flowchart LR
 
 | Rol | Ce rulează |
 |---|---|
-| Workstation | Windows 11 + WSL2 Ubuntu 24.04 (6 GB RAM, 4 vCPU): Docker Engine, kubectl, Helm 4, gh, Ansible (pipx) |
-| Cluster | VM Hyper-V Rocky/Alma Linux cu K3S (se creează la Faza 4) |
+| Workstation | Windows 11 + WSL2 Ubuntu 24.04 (6 GB RAM, 4 vCPU, `networkingMode=mirrored`): Docker Engine, kubectl, Helm 4, gh, Ansible (pipx) |
+| Cluster | VM Hyper-V `k3s-01`: Rocky Linux 9.8, 4 vCPU, 8 GB RAM statică, IP static `192.168.100.10` pe switch Internal + NAT, K3S v1.36.5 (canal stable), SELinux Enforcing, firewalld activ |
 
 ## Structură
 
 | Folder | Conținut |
 |---|---|
 | `app/` | Aplicația (Flask/FastAPI cu `/health` și `/metrics`) + Dockerfile + teste |
+| `k8s/` | Manifeste scrise de mână (Faza 4), păstrate pentru comparație cu chart-ul Helm |
 | `charts/` | Chart-ul Helm al aplicației |
 | `argocd/` | Manifestele `Application` pentru ArgoCD |
 | `ansible/` | Inventory, playbook-uri și roluri pentru VM și K3S |
@@ -43,7 +44,7 @@ flowchart LR
 - [x] 1. Fundația: repo, structură, README
 - [x] 2. Aplicația + Dockerfile
 - [x] 3. GitHub Actions → GHCR
-- [ ] 4. K3S + manifeste scrise de mână
+- [x] 4. K3S + manifeste scrise de mână
 - [ ] 5. Helm chart
 - [ ] 6. ArgoCD (GitOps, auto-sync, self-heal)
 - [ ] 7. Monitoring (kube-prometheus-stack, ServiceMonitor, dashboard, alertă)
@@ -92,6 +93,31 @@ flowchart LR
 - **Dependabot (`.github/dependabot.yml`)** propune săptămânal upgrade-uri ca PR-uri pentru pip, imaginea de bază Docker și action-uri. Versiunile fixate nu rămân vechi, iar fiecare upgrade trece prin CI.
 - **Comenzile interactive nu merg în pipe sau CI:** `gh run view | grep` fără ID a eșuat, pentru că gh nu poate afișa prompt-ul de selecție. În scripturi toți parametrii se dau explicit.
 
+### Faza 4: VM, rețea și K3S
+- **Rețea: switch Internal + NetNat, IP static.** `Default Switch` din Hyper-V schimbă subnetul la fiecare restart de Windows, ceea ce strică kubeconfig-ul și inventarul Ansible.
+- **WSL nu ajungea la VM:** Windows avea `Forwarding: Disabled` pe adaptoarele vEthernet. Diagnostic pe straturi: VM-ul răspundea din Windows (`Test-NetConnection`), ruta din WSL era corectă, deci pachetul murea în Windows. Primul fix: `Set-NetIPInterface -Forwarding Enabled` pe **ambele** adaptoare (dus și întors); `ttl=63` dovedea un hop rutat. A rezistat la `wsl --shutdown`, dar **nu la restartul Windows**: adaptorul WSL e recreat la fiecare boot, iar setarea se pierde. Fix final: `networkingMode=mirrored` în `.wslconfig`. WSL folosește direct interfețele și rutele din Windows (vede `192.168.100.1` și `192.168.1.131`), deci nu mai e nevoie de forwarding (`ttl=64`, fără hop). L-am dezactivat apoi și pe adaptorul K3S-NAT. Verificat după restart real.
+- **Un test de persistență trebuie să reproducă exact evenimentul de care te temi.** `wsl --shutdown` nu e același lucru cu un restart Windows.
+- **Passphrase-ul cheii se cere o dată per pornire WSL**, la primul terminal: `keychain` pornește `ssh-agent`, care ține cheia decriptată doar în memorie, deci după `wsl --shutdown` sau un restart Windows se pierde. Alternativa (deblocare la primul `ssh` cu `keychain --noask` + `AddKeysToAgent yes`) există, dar am păstrat varianta actuală. Ansible (non-interactiv) are nevoie de cheia deja deblocată.
+- **Exit code-ul spune stratul problemei:** `0` = port deschis, `1` = refused (nimic nu ascultă), `124` = timeout (firewall sau pachete pierdute).
+- **Secure Boot pe Gen 2 cu Linux:** e nevoie de template-ul `MicrosoftUEFICertificateAuthority`, nu de cel implicit `MicrosoftWindows`.
+- **ISO verificat cu SHA256**; sursa de adevăr e hash-ul, nu comentariul cu dimensiunea din fișierul CHECKSUM.
+- **Checkpoint `01-clean-os`** cu VM-ul oprit, ca punct de revenire pentru Faza 8.
+- **SSH:** cheie ed25519 dedicată lab-ului, cu passphrase, deblocată cu `keychain`. Fingerprint-ul host-ului se verifică out-of-band (consola Hyper-V), nu prin aceeași conexiune.
+- **Hardening SSH în `sshd_config.d/10-hardening.conf`:** la `sshd` prima valoare găsită câștigă, deci `10-` bate `50-redhat.conf`. În Ansible e invers (precedența mai mare câștigă). Verific mereu configurația efectivă (`sshd -T`), validez înainte de reload (`sshd -t`) și păstrez o sesiune deschisă cât testez.
+- **Swap oprit** (`swapoff` acum + `fstab` pentru boot): Kubernetes preferă un OOMKill vizibil în locul unei degradări lente pe disc.
+- **firewalld rămâne activ:** 6443 (API), 80/443 (Traefik), 30000-32767 (NodePort), iar pod CIDR `10.42.0.0/16` și service CIDR `10.43.0.0/16` în zona `trusted`. Altfel DNS-ul din cluster pică fără să pomenească nicăieri de firewall.
+- **K3S configurat prin `/etc/rancher/k3s/config.yaml`** (declarativ, ușor de pus în Ansible), cu `tls-san` pentru IP și hostname. Versiunea fixată pe canalul `stable`. Installer-ul a adus `k3s-selinux`, deci SELinux rămâne `Enforcing`.
+- **`sudo: k3s: command not found` pe RHEL:** `secure_path` din sudoers nu conține `/usr/local/bin`, intenționat (previne PATH hijacking). Nu l-am modificat; folosesc `kubectl` din WSL.
+- **kubeconfig:** copiat cu `install -m 600` (permisiuni setate atomic), contextul redenumit în `k3s-homelab`. E cheia de cluster-admin, deci nu ajunge în Git.
+- **Kubernetes rulează pe containerd, nu pe Docker.** Imaginile sunt OCI, deci compatibile.
+- **`helm-install-traefik` cu 1 restart:** reconciliation loop. Kubernetes nu garantează ordinea, reîncearcă până ajunge la starea dorită.
+- **Deployment → ReplicaSet → Pod:** fiecare versiune de imagine are propriul ReplicaSet (baza pentru `rollout undo`). Selectorul e imuabil.
+- **Readiness vs liveness:** readiness scoate pod-ul din Service, liveness repornește containerul. Verificarea DB-ului nu se pune în liveness.
+- **Requests vs limits:** memory limit da, CPU limit de obicei nu (throttling). QoS `Burstable`, pentru că requests < limits.
+- **Pod securityContext la nivel "restricted":** non-root, root filesystem read-only, fără capabilities, seccomp `RuntimeDefault`.
+- **Service:** IP și DNS stabile peste pod-uri efemere. EndpointSlice = lista pod-urilor Ready. Load balancing-ul e aleator (3 la 1 pe 4 request-uri), nu round-robin.
+- **IP-ul clientului se pierde la NodePort** (`10.42.0.1` în log-uri, SNAT). Se păstrează cu `externalTrafficPolicy: Local`.
+
 ## Greșeli făcute
 
 - **`wsl --install` a instalat doar platforma, nu și distribuția.** După restart, `wsl -l -v` arăta "no installed distributions". Diagnostic: `wsl --version` (platforma OK), `wsl --list --online` (catalogul OK), deci lipsea doar distro-ul. Fix: `wsl --install -d Ubuntu-24.04`. Lecție: verifici fiecare componentă separat, nu doar exit code-ul installer-ului.
@@ -99,3 +125,8 @@ flowchart LR
 - **`git checkout main.py` pe un fișier necomis:** după testul de cache am vrut să anulez linia adăugată, dar am primit `pathspec 'main.py' did not match any file(s) known to git`. Git poate restaura doar ce a văzut într-un commit, iar codul Fazei 2 nu era comis încă. Fix: am șters linia manual (`sed -i '$ d' main.py`). Lecție: commit des, înainte de experimente.
 - **`git push` înainte de `git commit`** a răspuns `Everything up-to-date`. Push-ul trimite commit-uri, nu fișierele din staging.
 - **`gh run view --log | grep` fără run ID** a eșuat cu `run or job ID required when not running interactively`. Fix: ID-ul luat cu `gh run list --json databaseId --jq '.[0].databaseId'`.
+- **Am testat conectivitatea de pe VM spre el însuși** (ping la propriul IP, 0.03 ms). Testul trebuia rulat din WSL. Contează de unde pornește testul, nu doar destinația.
+- **Am acceptat fingerprint-ul SSH (TOFU) fără verificare**, apoi am rulat verificarea în WSL în loc de VM. Corect: verifici în consola serverului, înainte de `yes`.
+- **`scp` într-un folder inexistent (`~/.kube`)** a eșuat, dar `&&` a împiedicat `rm`-ul de pe VM. Pașii distructivi se leagă cu `&&` (sau `set -e`).
+- **Am testat persistența forwarding-ului doar cu `wsl --shutdown`.** După restartul Windows, WSL nu mai ajungea la VM. Diagnostic: `Get-NetIPInterface` arăta `Forwarding: Disabled` doar pe adaptorul WSL (recreat la boot). Rezolvat cu WSL mirrored networking.
+- **Comandă cu ghilimea neînchisă** a lăsat shell-ul în prompt-ul `>` (PS2). Ctrl+C și rescriere.

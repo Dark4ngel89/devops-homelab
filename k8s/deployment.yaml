@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homelab-app
+  namespace: homelab
+  labels:
+    app.kubernetes.io/name: homelab-app
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  # Selectorul leagă Deployment-ul de pod-urile lui. E imuabil după creare.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: homelab-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # cel mult 1 pod în plus în timpul update-ului
+      maxUnavailable: 0  # niciodată sub numărul de replici dorit
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: homelab-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          # Tag imuabil (SHA-ul commit-ului), niciodată :latest în deploy.
+          image: ghcr.io/dark4ngel89/devops-homelab:sha-ea0bf3f
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          # Readiness: "pot primi trafic?" Dacă pică, pod-ul e scos din Service, nu repornit.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          # Liveness: "procesul mai trăiește?" Dacă pică de 3 ori, kubelet repornește containerul.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
