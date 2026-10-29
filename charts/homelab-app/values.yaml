@@ -1,7 +1,7 @@
 # Valorile implicite ale chart-ului. Orice cheie se poate suprascrie la install/upgrade
 # cu --set cheie=valoare sau -f alt-fisier.yaml.
 
-replicaCount: 2
+replicaCount: 3
 
 image:
   repository: ghcr.io/dark4ngel89/devops-homelab
