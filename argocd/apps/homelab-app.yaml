@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: homelab-app
+  # Application-urile stau în namespace-ul ArgoCD, nu în cel al aplicației.
+  namespace: argocd
+  # La ștergerea Application-ului, ArgoCD șterge și resursele create de el (cascade).
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # DE UNDE: chart-ul din repo, de pe branch-ul main.
+  source:
+    repoURL: https://github.com/Dark4ngel89/devops-homelab.git
+    targetRevision: main
+    path: charts/homelab-app
+    helm:
+      # Același nume ca release-ul Helm existent, ca label-ul "instance" (din selector) să rămână identic.
+      releaseName: homelab-app
+      valueFiles:
+        - values.yaml
+
+  # UNDE: clusterul în care rulează ArgoCD, namespace-ul homelab.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: homelab
+
+  # CUM: Git e sursa de adevăr. ArgoCD aplică automat orice commit și repară orice drift.
+  syncPolicy:
+    automated:
+      prune: true     # șterge din cluster resursele scoase din Git
+      selfHeal: true  # anulează modificările făcute manual în cluster

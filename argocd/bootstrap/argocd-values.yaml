@@ -1,0 +1,25 @@
+# Values pentru chart-ul oficial argo/argo-cd (versiune fixată la install: 10.11.6 / Argo CD v3.5.6).
+# Doar ce diferă de valorile implicite.
+
+global:
+  # Folosit de ingress și de URL-urile din UI.
+  domain: argocd.192.168.100.10.nip.io
+
+configs:
+  params:
+    # TLS se termină la Traefik; argocd-server servește HTTP în spatele lui.
+    # În lab nu avem certificate, deci totul e HTTP. În producție: cert-manager + TLS la ingress.
+    server.insecure: true
+
+server:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+
+# Fără SSO în lab (Dex e brokerul OIDC). Login cu userul local admin.
+dex:
+  enabled: false
+
+# Fără notificări (Slack, email) în lab.
+notifications:
+  enabled: false
