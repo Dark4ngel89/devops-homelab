@@ -28,6 +28,11 @@ resources:
     memory: 128Mi
 probes:
   path: /health
+# Necesită CRD-urile Prometheus Operator (kube-prometheus-stack) în cluster.
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  scrapeTimeout: 10s
 # Oprire grațioasă: preStop sleep < terminationGracePeriodSeconds.
 preStopSleepSeconds: 5
 terminationGracePeriodSeconds: 30

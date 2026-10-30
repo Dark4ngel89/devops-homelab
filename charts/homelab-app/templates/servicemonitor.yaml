@@ -1,0 +1,19 @@
+{{- if .Values.serviceMonitor.enabled }}
+# CRD-ul Prometheus Operator: îi spune lui Prometheus ce Service să citească, pe ce port și cât de des.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "homelab-app.fullname" . }}
+  labels:
+    {{- include "homelab-app.labels" . | nindent 4 }}
+spec:
+  # Aceleași label-uri ca selectorul Service-ului: găsește Service-ul, apoi endpoint-urile (pod-urile).
+  selector:
+    matchLabels:
+      {{- include "homelab-app.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http # numele portului din Service, nu numărul
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+{{- end }}
