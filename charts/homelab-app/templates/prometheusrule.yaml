@@ -1,0 +1,47 @@
+{{- if .Values.prometheusRule.enabled }}
+# Reguli de alertare citite de Prometheus Operator. Alertele pleacă spre Alertmanager.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "homelab-app.fullname" . }}
+  labels:
+    {{- include "homelab-app.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: {{ include "homelab-app.fullname" . }}.rules
+      rules:
+        # Niciun pod nu răspunde la scrape: aplicația e căzută pentru utilizatori.
+        - alert: HomelabAppDown
+          expr: sum(up{namespace="{{ .Release.Namespace }}", job="{{ include "homelab-app.fullname" . }}"}) == 0 or absent(up{namespace="{{ .Release.Namespace }}", job="{{ include "homelab-app.fullname" . }}"})
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            # {{`{{ ... }}`}} = text literal pentru Helm; Prometheus evaluează template-ul la alertare.
+            summary: "homelab-app nu are niciun pod care răspunde"
+            description: "Niciun target homelab-app nu e up în namespace-ul {{`{{ $labels.namespace }}`}} de cel puțin 1 minut."
+
+        # Mai puține pod-uri decât cere Deployment-ul: capacitate redusă, încă nu e outage.
+        - alert: HomelabAppReplicasMismatch
+          expr: kube_deployment_spec_replicas{namespace="{{ .Release.Namespace }}", deployment="{{ include "homelab-app.fullname" . }}"} != kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}", deployment="{{ include "homelab-app.fullname" . }}"}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "homelab-app rulează cu capacitate redusă"
+            description: "Disponibile {{`{{ $value }}`}} față de numărul cerut de replici, de peste 5 minute."
+
+        # Prea multe erori de server, raportat la tot traficul.
+        - alert: HomelabAppHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}", status=~"5.."}[5m]))
+              /
+            sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}"}[5m]))
+              > {{ .Values.prometheusRule.errorRateThreshold }}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "homelab-app: rată mare de erori 5xx"
+            description: "{{`{{ $value | humanizePercentage }}`}} din request-uri sunt 5xx în ultimele 5 minute."
+{{- end }}
