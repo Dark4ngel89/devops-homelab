@@ -11,6 +11,7 @@ flowchart LR
     dev([git push]) --> repo[GitHub repo]
     repo --> gha[GitHub Actions<br/>test + build]
     gha -->|push image| ghcr[(GHCR)]
+    gha -->|commit image.tag| repo
     argocd[ArgoCD] -->|watch| repo
     argocd -->|sync Helm chart| k3s[K3S cluster]
     k3s -->|pull image| ghcr
@@ -46,7 +47,7 @@ flowchart LR
 - [x] 3. GitHub Actions → GHCR
 - [x] 4. K3S + manifeste scrise de mână
 - [x] 5. Helm chart
-- [ ] 6. ArgoCD (GitOps, auto-sync, self-heal)
+- [x] 6. ArgoCD (GitOps, auto-sync, self-heal)
 - [ ] 7. Monitoring (kube-prometheus-stack, ServiceMonitor, dashboard, alertă)
 - [ ] 8. Ansible: provisioning VM + K3S
 - [ ] 9. Jenkins (opțional)
@@ -136,6 +137,20 @@ flowchart LR
 - **Race condition la oprirea pod-urilor.** SIGTERM-ul și scoaterea pod-ului din EndpointSlice se întâmplă în paralel, deci Traefik mai trimite câteva request-uri spre un pod deja oprit (`Bad Gateway`, timeout). `maxUnavailable: 0` și readiness protejează doar pornirea. Fix: `preStop: sleep: seconds: 5` (acțiune nativă Kubernetes, fără binarul `sleep` în imagine) + `terminationGracePeriodSeconds: 30`. Confirmat cu o buclă de `curl` la 0.5s în timpul upgrade-ului și rollback-ului: zero erori.
 - **Drift:** un `--set` există doar în comanda cuiva, nu în Git. E problema pe care o rezolvă GitOps (Faza 6).
 
+### Faza 6: ArgoCD și GitOps
+- **Pull vs push:** ArgoCD rulează în cluster și trage starea din Git. CI-ul nu are credențiale de cluster, deci un pipeline compromis nu poate face deploy direct.
+- **Instalare cu Helm** (chart `argo-cd` 10.11.6 / Argo CD v3.5.6), cu values în `argocd/bootstrap/`. `server.insecure` pentru că TLS-ul s-ar termina la Traefik; Dex și notifications dezactivate. Parola inițială de admin schimbată, iar `argocd-initial-admin-secret` șters.
+- **`Application` = de unde (repo, branch, path), unde (cluster, namespace), cum (sync policy).** Stă în namespace-ul `argocd`, nu în cel al aplicației. Finalizer-ul face ștergerea în cascadă a resurselor.
+- **Migrare de la Helm la ArgoCD fără downtime:** același `releaseName`, ca label-ul `instance` din selectorul imuabil să rămână identic. ArgoCD a preluat resursele (annotation `argocd.argoproj.io/tracking-id`), apoi am șters Secret-urile `sh.helm.release.v1.*`. **Nu `helm uninstall`**, care ar fi șters resursele. ArgoCD folosește Helm doar ca motor de template (`helm template`), deci după migrare `helm list` e gol.
+- **Git → cluster:** commit `replicaCount: 3` → al treilea pod, fără nicio comandă pe cluster.
+- **Self-heal:** `kubectl scale --replicas=1` → ArgoCD a recreat cele 2 pod-uri în ~1 secundă. Schimbările din cluster le vede imediat (watch pe API), pe cele din Git prin polling (~3 min; mai rapid cu webhook sau REFRESH). Pod-urile oprite au ajuns `Completed`, adică ieșire grațioasă datorită `preStop`.
+- **Self-heal vs HPA:** un HPA ar modifica `replicas`, iar ArgoCD l-ar readuce la valoarea din Git. Soluția: `ignoreDifferences` pe `/spec/replicas` sau scoaterea `replicas` din chart.
+- **DIFF-ul din UI există doar cât aplicația e `OutOfSync`.** Cu auto-sync durează câteva secunde. În incident: suspend auto-sync, analizez diff-ul, apoi decid.
+- **Bucla completă cod → cluster:** jobul `update-chart` din CI scrie `image.tag: sha-<commit>` în `values.yaml` cu `yq` și face commit ca `github-actions[bot]`, doar după ce imaginea există în GHCR (`needs: build`). Doar acest job are `contents: write`. Testat: `git push` → CI → commit bot → REFRESH → `{"message":"hello from homelab via GitOps","version":"sha-64cdf66"}`. Fiecare deploy e un commit, deci rollback = `git revert`. Alternativă: Argo CD Image Updater.
+- **Fără buclă infinită, din două motive independente:** commit-ul bot-ului atinge doar `charts/` (nu e în `paths:`), iar push-urile făcute cu `GITHUB_TOKEN` nu declanșează alte workflow-uri.
+- **CI-ul face commit-uri pe `main`, deci repo-ul local rămâne în urmă:** `git pull --rebase` înainte de push (`rebase.autoStash true` setat global).
+- **Rebase-ul schimbă SHA-ul commit-ului** (`d9843b8` local → `64cdf66` pe GitHub, alt părinte). Imaginea poartă SHA-ul care a ajuns pe remote.
+
 ## Greșeli făcute
 
 - **`wsl --install` a instalat doar platforma, nu și distribuția.** După restart, `wsl -l -v` arăta "no installed distributions". Diagnostic: `wsl --version` (platforma OK), `wsl --list --online` (catalogul OK), deci lipsea doar distro-ul. Fix: `wsl --install -d Ubuntu-24.04`. Lecție: verifici fiecare componentă separat, nu doar exit code-ul installer-ului.
@@ -150,3 +165,5 @@ flowchart LR
 - **Am presupus că rolling update-ul cu `maxUnavailable: 0` înseamnă zero downtime.** Bucla de `curl` a arătat 2 erori (`Bad Gateway`, timeout) atât la upgrade, cât și la rollback. Cauza: race condition la oprirea pod-urilor. Rezolvat cu `preStop` sleep și reconfirmat cu același test. Lecție: un fix e confirmat doar când testul care arăta problema nu o mai arată.
 - **`helm list -a` din Helm 3 nu mai există în Helm 4.** Am citit `--help`-ul versiunii instalate în loc să mă bazez pe memorie.
 - **Comandă cu ghilimea neînchisă** a lăsat shell-ul în prompt-ul `>` (PS2). Ctrl+C și rescriere.
+- **Nu știam unde e "APP DIFF" în ArgoCD.** E butonul DIFF de pe pagina aplicației și are conținut doar cât aplicația e `OutOfSync`. Cu auto-sync, starea trece în câteva secunde.
+- **`git pull --rebase` înainte de `git commit`** a dat `cannot pull with rebase: You have unstaged changes`. Rebase-ul rescrie working tree-ul, deci refuză să riște modificări necomise. Ordinea corectă: commit → `pull --rebase` → push (sau `rebase.autoStash true`).
