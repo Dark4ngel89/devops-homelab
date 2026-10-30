@@ -44,7 +44,7 @@ async def metrics_middleware(request: Request, call_next):
 
 @app.get("/")
 def root():
-    return {"message": "hello from homelab", "version": APP_VERSION}
+    return {"message": "hello from homelab via GitOps", "version": APP_VERSION}
 
 
 @app.get("/health")
