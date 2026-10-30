@@ -2,51 +2,41 @@
 # cu --set cheie=valoare sau -f alt-fisier.yaml.
 
 replicaCount: 3
-
 image:
   repository: ghcr.io/dark4ngel89/devops-homelab
   # Gol = folosește appVersion din Chart.yaml.
-  tag: ""
+  tag: "sha-d18c030"
   pullPolicy: IfNotPresent
-
 nameOverride: ""
 fullnameOverride: ""
-
 containerPort: 8000
-
 service:
   type: ClusterIP
   port: 80
   # Folosit doar dacă type: NodePort.
   nodePort: null
-
 ingress:
   enabled: true
   className: traefik
   # nip.io: orice <ceva>.192.168.100.10.nip.io se rezolvă în 192.168.100.10, fără /etc/hosts.
   host: app.192.168.100.10.nip.io
-
 resources:
   requests:
     cpu: 50m
     memory: 64Mi
   limits:
     memory: 128Mi
-
 probes:
   path: /health
-
 # Oprire grațioasă: preStop sleep < terminationGracePeriodSeconds.
 preStopSleepSeconds: 5
 terminationGracePeriodSeconds: 30
-
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 10001
   runAsGroup: 10001
   seccompProfile:
     type: RuntimeDefault
-
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
