@@ -1,0 +1,81 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # Chart extern, din repo-ul Helm oficial, cu versiune fixată (upgrade = commit care schimbă versiunea).
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.16.1
+    helm:
+      releaseName: monitoring
+      valuesObject:
+        # K3S rulează controller-manager, scheduler, proxy și etcd în același binar k3s,
+        # ascultând pe localhost. Prometheus nu le poate citi, deci targeturile ar fi mereu
+        # "down" și alertele ar suna degeaba. Le dezactivăm.
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false
+        kubeEtcd:
+          enabled: false
+
+        prometheus:
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - prometheus.192.168.100.10.nip.io
+            paths:
+              - /
+            pathType: Prefix
+          prometheusSpec:
+            # Implicit, Prometheus citește doar ServiceMonitor/PrometheusRule cu label-ul
+            # release=monitoring. Cu false, le citește pe toate, deci și pe cele din chart-ul nostru.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            retention: 5d
+            retentionSize: 4GB
+            # Date pe disc (local-path din K3S), ca să supraviețuiască restartului pod-ului.
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: local-path
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 5Gi
+
+        grafana:
+          # Userul și parola vin din Secret-ul creat manual (nu din Git).
+          admin:
+            existingSecret: grafana-admin
+            userKey: admin-user
+            passwordKey: admin-password
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - grafana.192.168.100.10.nip.io
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # CRD-urile Prometheus Operator depășesc limita de 256 KB a annotation-ului
+      # last-applied-configuration din client-side apply.
+      - ServerSideApply=true
