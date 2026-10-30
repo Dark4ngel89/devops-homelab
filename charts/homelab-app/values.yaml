@@ -33,6 +33,9 @@ serviceMonitor:
   enabled: true
   interval: 15s
   scrapeTimeout: 10s
+# ConfigMap cu dashboard-ul Grafana (încărcat de sidecar-ul din kube-prometheus-stack).
+grafanaDashboard:
+  enabled: true
 # Oprire grațioasă: preStop sleep < terminationGracePeriodSeconds.
 preStopSleepSeconds: 5
 terminationGracePeriodSeconds: 30

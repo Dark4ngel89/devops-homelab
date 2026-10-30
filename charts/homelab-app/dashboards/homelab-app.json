@@ -1,0 +1,118 @@
+{
+  "uid": "homelab-app",
+  "title": "Homelab App (RED)",
+  "tags": ["homelab", "red"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus"
+      },
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(http_requests_total, namespace)", "refId": "ns" },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Pods up",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(up{namespace=\"$namespace\", job=\"homelab-app\"})" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Request rate (req/s, fără /health)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_requests_total{namespace=\"$namespace\", path!=\"/health\"}[$__rate_interval]))" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Error ratio (5xx)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_requests_total{namespace=\"$namespace\", status=~\"5..\"}[$__rate_interval])) / sum(rate(http_requests_total{namespace=\"$namespace\"}[$__rate_interval])) or vector(0)" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Container restarts (1h)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\", container=\"app\"}[1h])) or vector(0)" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Rate: requests/s pe path și status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (path, status) (rate(http_requests_total{namespace=\"$namespace\"}[$__rate_interval]))", "legendFormat": "{{path}} {{status}}" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Errors: requests/s cu status 4xx și 5xx",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (rate(http_requests_total{namespace=\"$namespace\", status=~\"[45]..\"}[$__rate_interval]))", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Duration: latență p50 / p95 / p99 (fără /health)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"$namespace\", path!=\"/health\"}[$__rate_interval])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"$namespace\", path!=\"/health\"}[$__rate_interval])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"$namespace\", path!=\"/health\"}[$__rate_interval])))", "legendFormat": "p99" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{{- if .Values.grafanaDashboard.enabled }}
+# Sidecar-ul din pod-ul Grafana urmărește ConfigMap-urile cu label-ul grafana_dashboard=1
+# din toate namespace-urile și încarcă JSON-ul ca dashboard. Dashboard as code, versionat cu aplicația.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "homelab-app.fullname" . }}-dashboard
+  labels:
+    {{- include "homelab-app.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  # .Files.Get citește fișierul ca text, fără să-l treacă prin template-uri:
+  # {{ "{{path}}" }} din legendFormat ajunge neatins la Grafana.
+  homelab-app.json: |-
+    {{- .Files.Get "dashboards/homelab-app.json" | nindent 4 }}
+{{- end }}
