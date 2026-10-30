@@ -1,0 +1,27 @@
+# App-of-apps: singurul manifest aplicat manual (bootstrap).
+# Citește folderul argocd/apps/; orice Application adăugată acolo în Git apare în ArgoCD.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  # Fără finalizer, intenționat: ștergerea lui root nu șterge în cascadă aplicațiile-copil.
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/Dark4ngel89/devops-homelab.git
+    targetRevision: main
+    path: argocd/apps
+    directory:
+      recurse: false
+
+  # Application-urile-copil sunt resurse în namespace-ul argocd.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true     # un fișier șters din argocd/apps/ => Application ștearsă
+      selfHeal: true
