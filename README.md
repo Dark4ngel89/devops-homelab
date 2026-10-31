@@ -48,7 +48,7 @@ flowchart LR
 - [x] 4. K3S + manifeste scrise de mână
 - [x] 5. Helm chart
 - [x] 6. ArgoCD (GitOps, auto-sync, self-heal)
-- [ ] 7. Monitoring (kube-prometheus-stack, ServiceMonitor, dashboard, alertă)
+- [x] 7. Monitoring (kube-prometheus-stack, ServiceMonitor, dashboard, alertă)
 - [ ] 8. Ansible: provisioning VM + K3S
 - [ ] 9. Jenkins (opțional)
 - [ ] 10. Incidente simulate + post-mortems
@@ -151,6 +151,23 @@ flowchart LR
 - **CI-ul face commit-uri pe `main`, deci repo-ul local rămâne în urmă:** `git pull --rebase` înainte de push (`rebase.autoStash true` setat global).
 - **Rebase-ul schimbă SHA-ul commit-ului** (`d9843b8` local → `64cdf66` pe GitHub, alt părinte). Imaginea poartă SHA-ul care a ajuns pe remote.
 
+### Faza 7: Monitoring
+- **App-of-apps:** `argocd/root.yaml` (singurul `kubectl apply` manual, bootstrap) citește `argocd/apps/`. O aplicație nouă = un fișier în Git. `root` nu are finalizer, ca ștergerea lui să nu șteargă în cascadă copiii. `homelab-app` a fost adoptat fără recreare (tracking-id `root:...`). Argo CD v3 urmărește resursele prin annotation, nu prin label.
+- **kube-prometheus-stack 92.16.1 ca Application** cu chart extern fixat și `valuesObject` inline. `ServerSideApply=true`, pentru că CRD-urile depășesc limita de 256 KB a annotation-ului de client-side apply.
+- **Specific K3S:** controller-manager, scheduler, proxy și etcd rulează în binarul `k3s`, pe localhost. Le-am dezactivat în chart, altfel ar fi fost targeturi `down` și alerte false de la prima zi.
+- **`*SelectorNilUsesHelmValues: false`:** implicit, Prometheus citește doar ServiceMonitor-ele și regulile cu label-ul `release: monitoring`. Fără asta, cele din chart-ul aplicației ar fi ignorate fără nicio eroare.
+- **Persistență:** PVC 5Gi `local-path`, `retention: 5d`, `retentionSize: 4GB` (sub mărimea PVC-ului). Fără `storageSpec`, datele stau în `emptyDir` și se pierd la restart.
+- **Parola Grafana într-un Kubernetes Secret creat manual** (`grafana-admin`, generat cu `openssl rand`), referit prin `existingSecret`. Verificat: parola implicită `prom-operator` dă `401`. Limita: Secret-ul nu e în Git, deci la reconstrucție se recreează manual. În producție: Sealed Secrets, External Secrets Operator sau SOPS.
+- **`Watchdog` sună mereu:** dead man's switch. Se trimite la un serviciu extern, care anunță când alerta **nu mai** vine.
+- **ServiceMonitor în chart-ul aplicației:** selectează Service-ul prin label-uri și portul prin **nume** (`http`). Operator-ul generează config-ul de scrape, nimeni nu editează `prometheus.yml`. Monitorizarea vine odată cu aplicația.
+- **Dashboard as code:** ConfigMap cu label-ul `grafana_dashboard: "1"`, încărcat de sidecar-ul Grafana. JSON-ul e inclus cu `.Files.Get`, ca `{{path}}` din `legendFormat` să nu fie evaluat de Helm. Dashboard-ul e provisioned, deci nu se poate salva din UI: sursa de adevăr e Git.
+- **RED:** Rate, Errors, Duration. `/health` exclus (probe-urile umflă traficul). `histogram_quantile` peste `sum by (le)`: agregi bucket-urile, apoi calculezi percentila (media percentilelor e greșită).
+- **Percentilele sunt doar atât de precise cât bucket-urile.** Toate request-urile durează sub 5 ms, deci cad în primul bucket implicit, iar p50/p95/p99 ies 2.5/4.75/4.95 ms prin interpolare liniară, nu din măsurători. Bucket-urile se aleg după SLO.
+- **Alerte (PrometheusRule în chart):** `HomelabAppDown` (critical, `for: 1m`, cu `absent()` pentru cazul în care nu mai există serii), `HomelabAppReplicasMismatch` (warning, `for: 5m`, ca un rolling update să nu sune), `HomelabAppHighErrorRate` (raport 5xx/total > 5%, nu număr absolut). Template-urile Prometheus (`{{ $value }}`) sunt escapate pentru Helm cu `` {{`...`}} ``. Validate cu `promtool check rules`.
+- **Demo alertă prin GitOps:** commit `replicaCount: 0` → `pending` după ~40s → `firing` exact după `for: 1m` → la Alertmanager cu severitate și descriere → `git revert`. ArgoCD a arătat tot timpul `Synced/Healthy`: **GitOps garantează consistența (cluster = Git), nu corectitudinea.** Doar alerta care se uită la realitate (`up`) a prins outage-ul; `ReplicasMismatch` compară cu starea dorită, deci n-a sunat.
+- **Label-ul `helm.sh/chart` e și pe pod template:** orice bump de versiune a chart-ului repornește pod-urile, chiar dacă aplicația nu s-a schimbat.
+- **`yq -i` din CI a șters rândurile goale** din `values.yaml`. Rescrie YAML-ul din date, iar rândurile goale nu fac parte din date. Alternative: `sed` țintit sau un fișier separat doar pentru tag.
+
 ## Greșeli făcute
 
 - **`wsl --install` a instalat doar platforma, nu și distribuția.** După restart, `wsl -l -v` arăta "no installed distributions". Diagnostic: `wsl --version` (platforma OK), `wsl --list --online` (catalogul OK), deci lipsea doar distro-ul. Fix: `wsl --install -d Ubuntu-24.04`. Lecție: verifici fiecare componentă separat, nu doar exit code-ul installer-ului.
@@ -167,3 +184,7 @@ flowchart LR
 - **Comandă cu ghilimea neînchisă** a lăsat shell-ul în prompt-ul `>` (PS2). Ctrl+C și rescriere.
 - **Nu știam unde e "APP DIFF" în ArgoCD.** E butonul DIFF de pe pagina aplicației și are conținut doar cât aplicația e `OutOfSync`. Cu auto-sync, starea trece în câteva secunde.
 - **`git pull --rebase` înainte de `git commit`** a dat `cannot pull with rebase: You have unstaged changes`. Rebase-ul rescrie working tree-ul, deci refuză să riște modificări necomise. Ordinea corectă: commit → `pull --rebase` → push (sau `rebase.autoStash true`).
+- **Dashboard-ul Grafana nu mai încărca date** (`Request has been terminated`). Diagnostic pe straturi: pod-uri, `/api/health`, datasource, recording rules și log-urile Grafana erau OK, iar query-urile tăiate nu ajungeau la server. În log-uri apăreau cereri `/<GUID>/netdefender/alert/...`: pagina de blocare a Bitdefender de pe Windows, injectată în trafic (`nip.io` e folosit des în phishing). Fix: excepție îngustă pentru `*.192.168.100.10.nip.io`. Lecție: "network error" în browser + cerere care nu apare pe server = ceva la mijloc (antivirus, proxy, extensie).
+- **`curl` cu `{...}` în URL** (`up{namespace="homelab"}`) n-a întors nimic: curl interpretează acoladele ca globbing, iar `-s` a ascuns eroarea. Fix: `-g` sau `--data-urlencode`. La depanare: `-sS`.
+- **Am verificat Alertmanager prea devreme**, când alerta era încă `pending`. Prometheus trimite la Alertmanager doar alertele `firing`.
+- **`kill %1` după un port-forward pornit cu `&`** a nimerit job-ul greșit, pentru că rămăsese un job mai vechi, iar port-forward-ul a rămas pornit. Mai sigur: `kill $!` (PID-ul ultimului proces din fundal).
