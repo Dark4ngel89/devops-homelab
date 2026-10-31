@@ -1,0 +1,27 @@
+---
+# Patching OS, separat de configurare: rezultatul depinde de ziua în care rulezi
+# (ce pachete noi au apărut), deci nu e idempotent în timp. Rulat explicit, la nevoie.
+- name: Patch OS packages, one node at a time
+  hosts: k3s_cluster
+  become: true
+  # Câte un nod pe rând: dacă un nod nu revine după reboot, play-ul se oprește
+  # înainte să atingă următorul.
+  serial: 1
+  tasks:
+    - name: Upgrade all packages
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest  # noqa: package-latest  (scopul acestui playbook e exact update-ul)
+
+    # needs-restarting -r: rc=0 nu e nevoie de reboot, rc=1 e nevoie (kernel, glibc, systemd actualizate).
+    - name: Check if a reboot is required
+      ansible.builtin.command: needs-restarting -r
+      register: patch_needs_restart
+      changed_when: false          # doar citește, nu schimbă nimic
+      failed_when: patch_needs_restart.rc not in [0, 1]
+      check_mode: false            # rulează și în --check, ca să știm ce s-ar întâmpla
+
+    - name: Reboot if required
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when: patch_needs_restart.rc == 1

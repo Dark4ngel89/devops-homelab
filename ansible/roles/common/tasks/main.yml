@@ -1,0 +1,43 @@
+---
+# Configurarea de bază a OS-ului, comună tuturor nodurilor. Descrie o stare fixă:
+# la a doua rulare nu are ce schimba. Update-urile de pachete sunt în patch.yml, separat.
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ timezone }}"
+
+- name: Install base packages
+  ansible.builtin.dnf:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: Ensure chronyd is running
+  ansible.builtin.systemd_service:
+    name: chronyd
+    state: started
+    enabled: true
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+# Doar serviciile care există: un failed_when: false ar ascunde și erorile reale.
+- name: Disable unneeded services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ common_disabled_services }}"
+  when: (item ~ '.service') in ansible_facts['services']
+
+# Swap: oprit acum (swapoff) ȘI la boot (fstab). Kubernetes preferă OOMKill în locul swap-ului.
+- name: Turn off swap now
+  ansible.builtin.command: swapoff -a
+  when: ansible_facts['swaptotal_mb'] | int > 0
+  changed_when: true
+
+- name: Comment out swap entries in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+    backup: true

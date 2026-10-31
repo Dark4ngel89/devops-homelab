@@ -1,0 +1,7 @@
+---
+# Rulează o singură dată, la finalul play-ului, și doar dacă un task l-a notificat (changed).
+# reload, nu restart: sesiunile SSH existente (inclusiv a lui Ansible) rămân deschise.
+- name: Reload sshd
+  ansible.builtin.systemd_service:
+    name: sshd
+    state: reloaded

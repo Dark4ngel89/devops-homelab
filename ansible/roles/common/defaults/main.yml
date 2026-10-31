@@ -1,0 +1,9 @@
+# Valori implicite (precedența cea mai mică): se suprascriu din group_vars/host_vars.
+common_packages:
+  - chrony          # sincronizare timp: TLS și etcd depind de ceas corect
+  - dnf-utils       # needs-restarting: folosit de patch.yml ca să știe dacă trebuie reboot
+  - bash-completion
+  - tar             # folosit de installer-ul k3s
+
+common_disabled_services:
+  - kdump           # rezervă RAM pentru crash dump; inutil în lab

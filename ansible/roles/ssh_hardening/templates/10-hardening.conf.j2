@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# Doar autentificare cu cheie, fără root
+{% for key, value in ssh_hardening_settings.items() %}
+{{ key }} {{ value }}
+{% endfor %}

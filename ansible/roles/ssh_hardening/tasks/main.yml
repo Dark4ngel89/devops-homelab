@@ -1,0 +1,30 @@
+---
+# Siguranță întâi: dacă userul nu are cheie autorizată, oprirea parolei ne-ar încuia afară.
+- name: Look up the Ansible user's home directory
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ ansible_user }}"
+
+- name: Check that the Ansible user has an authorized_keys file
+  ansible.builtin.stat:
+    path: "{{ ansible_facts['getent_passwd'][ansible_user][4] }}/.ssh/authorized_keys"
+  register: ssh_hardening_authorized_keys
+
+- name: Refuse to disable password login without an authorized key
+  ansible.builtin.assert:
+    that:
+      - ssh_hardening_authorized_keys.stat.exists
+      - ssh_hardening_authorized_keys.stat.size > 0
+    fail_msg: "{{ ansible_user }} nu are authorized_keys: hardening-ul ar bloca accesul SSH."
+
+# validate: sshd verifică fișierul temporar ÎNAINTE să-l pună la locul lui.
+# Un fișier invalid nu ajunge niciodată pe disc, deci sshd nu poate fi stricat de aici.
+- name: Deploy sshd hardening drop-in
+  ansible.builtin.template:
+    src: 10-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0600"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd

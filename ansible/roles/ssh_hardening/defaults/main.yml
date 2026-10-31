@@ -1,0 +1,8 @@
+# Setările scrise în /etc/ssh/sshd_config.d/10-hardening.conf.
+# La sshd prima valoare găsită câștigă, deci 10- bate 50-redhat.conf.
+ssh_hardening_settings:
+  PasswordAuthentication: "no"
+  KbdInteractiveAuthentication: "no"
+  PermitRootLogin: "no"
+  PubkeyAuthentication: "yes"
+  MaxAuthTries: 3
