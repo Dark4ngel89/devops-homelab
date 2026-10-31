@@ -25,6 +25,19 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.topologySpread.enabled }}
+      # Pod-urile împărțite cât mai egal pe noduri: un nod căzut nu ia toate replicile cu el.
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.topologySpread.maxSkew }}
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: {{ .Values.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "homelab-app.selectorLabels" . | nindent 14 }}
+          # Numără doar pod-urile din aceeași versiune (ReplicaSet), nu și pe cele vechi din rollout.
+          matchLabelKeys:
+            - pod-template-hash
+      {{- end }}
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ include "homelab-app.imageTag" . }}"

@@ -1,0 +1,15 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+# Limitează întreruperile VOLUNTARE (kubectl drain, upgrade de nod): drain-ul așteaptă
+# în loc să scoată prea multe pod-uri deodată. Nu protejează la căderi (nod mort, OOM).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "homelab-app.fullname" . }}
+  labels:
+    {{- include "homelab-app.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "homelab-app.selectorLabels" . | nindent 6 }}
+{{- end }}

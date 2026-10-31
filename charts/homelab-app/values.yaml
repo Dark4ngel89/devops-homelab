@@ -41,6 +41,16 @@ prometheusRule:
   enabled: true
   # Fracțiune din request-uri: 0.05 = 5% erori 5xx.
   errorRateThreshold: 0.05
+# Împărțirea pod-urilor pe noduri. ScheduleAnyway = preferință, nu regulă: pe un singur nod
+# pod-urile tot pornesc (DoNotSchedule le-ar lăsa Pending).
+topologySpread:
+  enabled: true
+  maxSkew: 1
+  whenUnsatisfiable: ScheduleAnyway
+# Câte pod-uri pot lipsi deodată la o întrerupere voluntară (drain).
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
 # Oprire grațioasă: preStop sleep < terminationGracePeriodSeconds.
 preStopSleepSeconds: 5
 terminationGracePeriodSeconds: 30
