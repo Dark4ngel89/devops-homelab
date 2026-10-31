@@ -1,0 +1,43 @@
+---
+# firewalld rămâne activ. permanent + immediate: regula se aplică acum ȘI supraviețuiește reboot-ului,
+# fără un reload separat.
+
+- name: Install firewalld
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+
+- name: Ensure firewalld is running
+  ansible.builtin.systemd_service:
+    name: firewalld
+    state: started
+    enabled: true
+
+- name: Open public ports
+  ansible.posix.firewalld:
+    zone: public
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ firewall_public_ports + firewall_extra_public_ports }}"
+
+- name: Open node-to-node ports, only from the node network
+  ansible.posix.firewalld:
+    zone: public
+    rich_rule: >-
+      rule family="ipv4" source address="{{ firewall_node_network }}"
+      port port="{{ item.split('/')[0] }}" protocol="{{ item.split('/')[1] }}" accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ firewall_node_ports }}"
+
+- name: Trust pod and service networks
+  ansible.posix.firewalld:
+    zone: trusted
+    source: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ firewall_trusted_sources }}"

@@ -6,3 +6,5 @@ ssh_hardening_settings:
   PermitRootLogin: "no"
   PubkeyAuthentication: "yes"
   MaxAuthTries: 3
+  # Kerberos nu există în lab; activ implicit pe RHEL, încetinește login-ul (lookup DNS).
+  GSSAPIAuthentication: "no"

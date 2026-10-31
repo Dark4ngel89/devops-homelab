@@ -1,0 +1,5 @@
+# Doar pentru serverele K3S (control plane). Are prioritate față de k3s_cluster.yml.
+# Folosim firewall_extra_public_ports, nu firewall_public_ports: dacă am redefini lista aici,
+# serverul ar pierde 80/443/NodePort (listele nu se combină între group_vars, se înlocuiesc).
+firewall_extra_public_ports:
+  - 6443/tcp          # API server: kubectl din WSL și agenții care intră în cluster

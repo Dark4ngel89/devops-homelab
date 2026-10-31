@@ -1,0 +1,12 @@
+# Porturi deschise în zona public (oricine ajunge la nod).
+firewall_public_ports: []
+# Porturi în plus, specifice unui grup (ex. 6443 doar pe server). Se ADAUGĂ la cele de mai sus,
+# nu le înlocuiesc: o listă redefinită într-un group_vars mai specific ar suprascrie-o complet.
+firewall_extra_public_ports: []
+
+# Porturi deschise doar pentru celelalte noduri (rich rules cu sursa = rețeaua nodurilor).
+firewall_node_ports: []
+firewall_node_network: 192.168.100.0/24
+
+# Rețele cărora le permitem tot traficul (zona trusted): pod-urile și Service-urile.
+firewall_trusted_sources: []

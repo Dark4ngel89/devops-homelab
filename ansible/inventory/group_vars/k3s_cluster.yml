@@ -7,3 +7,16 @@ k3s_server_ip: "{{ hostvars[groups['k3s_server'][0]]['ansible_host'] }}"
 
 k3s_pod_cidr: 10.42.0.0/16
 k3s_service_cidr: 10.43.0.0/16
+
+# Firewall pe toate nodurile.
+firewall_public_ports:
+  - 80/tcp            # Traefik (ServiceLB rulează pe fiecare nod)
+  - 443/tcp
+  - 30000-32767/tcp   # NodePort
+firewall_node_ports:
+  - 10250/tcp         # kubelet: logs/exec de la API server, metrici pentru Prometheus
+  - 8472/udp          # flannel VXLAN: traficul pod-pod între noduri
+  - 9100/tcp          # node-exporter (hostNetwork), citit de Prometheus de pe alt nod
+firewall_trusted_sources:
+  - "{{ k3s_pod_cidr }}"
+  - "{{ k3s_service_cidr }}"
