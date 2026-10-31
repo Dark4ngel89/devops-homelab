@@ -1,5 +1,7 @@
 ---
 # Playbook-ul principal. Ordinea play-urilor și a rolurilor = ordinea în care se aplică.
+
+# 1. Toate nodurile: OS, SSH, firewall (în paralel pe toate host-urile).
 - name: Base OS configuration
   hosts: k3s_cluster
   become: true
@@ -7,3 +9,17 @@
     - common
     - ssh_hardening
     - firewall
+
+# 2. Serverul ÎNAINTE de agenți: agenții au nevoie de API-ul pornit și de token-ul lui.
+- name: K3S server
+  hosts: k3s_server
+  become: true
+  roles:
+    - k3s
+
+# 3. Agenții: citesc token-ul înregistrat în play-ul 2 (hostvars), apoi intră în cluster.
+- name: K3S agents
+  hosts: k3s_agent
+  become: true
+  roles:
+    - k3s

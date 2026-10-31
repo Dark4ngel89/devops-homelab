@@ -1,0 +1,29 @@
+---
+# Dependență între host-uri: token-ul vine de la serverul procesat în play-ul anterior.
+# Dacă play-ul serverului n-a rulat (ex. --limit k3s-02), variabila nu există: oprim clar, aici.
+- name: Check that the server token was read in this run
+  ansible.builtin.assert:
+    that:
+      - hostvars[k3s_server_host]['k3s_node_token_file'] is defined
+      - hostvars[k3s_server_host]['k3s_node_token_file']['content'] is defined
+    fail_msg: >-
+      Token-ul de la {{ k3s_server_host }} lipsește. Rulează playbook-ul și pe server
+      (ex. --limit k3s_server,{{ inventory_hostname }}), nu doar pe agent.
+    quiet: true
+  vars:
+    k3s_server_host: "{{ groups['k3s_server'][0] }}"
+  when: not ansible_check_mode
+
+- name: Write k3s agent config
+  ansible.builtin.template:
+    src: config-agent.yaml.j2
+    dest: "{{ k3s_config_dir }}/config.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  vars:
+    k3s_token: "{{ hostvars[groups['k3s_server'][0]]['k3s_node_token_file']['content'] | b64decode | trim }}"
+  no_log: true                  # fișierul conține token-ul
+  diff: false                   # --diff l-ar afișa în clar
+  notify: Restart k3s
+  when: not ansible_check_mode

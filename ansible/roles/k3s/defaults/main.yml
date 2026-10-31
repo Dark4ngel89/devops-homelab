@@ -1,0 +1,18 @@
+# Obligatoriu, setat în inventar (group_vars/k3s_cluster.yml). Gol aici = rolul refuză să ruleze.
+k3s_version: ""
+
+# server sau agent, după grupul din inventar. Același rol, două căi.
+k3s_node_role: "{{ 'server' if inventory_hostname in groups['k3s_server'] else 'agent' }}"
+k3s_service_name: "{{ 'k3s' if k3s_node_role == 'server' else 'k3s-agent' }}"
+
+# Installer-ul fixat pe aceeași versiune ca binarul (tag-ul din GitHub, nu get.k3s.io care se schimbă).
+k3s_install_script_url: "https://raw.githubusercontent.com/k3s-io/k3s/{{ k3s_version | urlencode }}/install.sh"
+k3s_install_script_path: /usr/local/bin/k3s-install.sh
+
+k3s_binary: /usr/local/bin/k3s
+k3s_config_dir: /etc/rancher/k3s
+k3s_token_path: /var/lib/rancher/k3s/server/node-token
+
+# Cât așteptăm ca un agent nou să ajungă Ready (retries x delay secunde).
+k3s_node_ready_retries: 30
+k3s_node_ready_delay: 10

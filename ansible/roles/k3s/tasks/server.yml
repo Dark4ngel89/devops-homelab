@@ -1,0 +1,9 @@
+---
+- name: Write k3s server config
+  ansible.builtin.template:
+    src: config-server.yaml.j2
+    dest: "{{ k3s_config_dir }}/config.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart k3s

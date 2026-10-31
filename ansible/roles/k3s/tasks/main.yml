@@ -1,0 +1,63 @@
+---
+# Ordinea: versiunea instalată -> config -> install (citește config-ul) -> pași specifici server/agent.
+
+# Fail fast: fără versiune fixată, installer-ul ar lua "latest" (alt cluster la fiecare rulare).
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - k3s_version | length > 0
+    fail_msg: "k3s_version nu e setat. Setează-l în inventory/group_vars/k3s_cluster.yml."
+    quiet: true
+
+- name: Check installed k3s version
+  ansible.builtin.command: "{{ k3s_binary }} --version"
+  register: k3s_installed
+  changed_when: false
+  failed_when: false           # pe un nod nou binarul nu există încă
+  check_mode: false
+
+# Stare calculată la rulare (nu configurare), deci set_fact e potrivit aici.
+- name: Decide whether k3s needs to be installed
+  ansible.builtin.set_fact:
+    # noqa: jinja[invalid]  (lint-ul randează fără inventar; k3s_version e validat mai sus)
+    k3s_needs_install: "{{ k3s_version not in (k3s_installed.stdout | default('')) }}"
+
+- name: Create k3s config directory
+  ansible.builtin.file:
+    path: "{{ k3s_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Config-ul se scrie ÎNAINTE de install: serviciul pornit de installer îl citește la primul start.
+- name: Write config for {{ k3s_node_role }}
+  ansible.builtin.include_tasks: "{{ k3s_node_role }}.yml"
+
+- name: Download pinned k3s installer
+  ansible.builtin.get_url:
+    url: "{{ k3s_install_script_url }}"
+    dest: "{{ k3s_install_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+# Rulează doar dacă versiunea instalată diferă de cea cerută: pe k3s-01 nu face nimic.
+- name: Install k3s {{ k3s_version }}
+  ansible.builtin.command: "{{ k3s_install_script_path }}"
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    INSTALL_K3S_EXEC: "{{ k3s_node_role }}"
+  when: k3s_needs_install
+  changed_when: true
+
+# În --check, pe un nod nou installer-ul n-a rulat, deci serviciul nu există încă.
+- name: Ensure k3s service is running
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_service_name }}"
+    state: started
+    enabled: true
+  when: not (ansible_check_mode and k3s_needs_install)
+
+- name: Finish setup for {{ k3s_node_role }}
+  ansible.builtin.include_tasks: "{{ k3s_node_role }}_post.yml"

@@ -1,0 +1,15 @@
+---
+- name: Wait for the node token
+  ansible.builtin.wait_for:
+    path: "{{ k3s_token_path }}"
+    timeout: 120
+  when: not ansible_check_mode
+
+# Token-ul nu stă în Git: e citit de pe server la fiecare rulare și ținut doar în memorie.
+# Variabila înregistrată aici e citită de agenți prin hostvars (play-ul următor).
+- name: Read the node token
+  ansible.builtin.slurp:
+    src: "{{ k3s_token_path }}"
+  register: k3s_node_token_file
+  no_log: true
+  when: not ansible_check_mode

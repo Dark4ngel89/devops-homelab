@@ -1,0 +1,21 @@
+---
+# Verificarea finală vine de la server: nodul e Ready doar dacă serverul îl vede așa.
+# argv (listă), nu string: modulul command desparte string-ul ca un shell și ar mânca
+# ghilimelele din jsonpath ("Ready" -> Ready, care pentru jsonpath e un identificator invalid).
+- name: Wait until the node is Ready
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - node
+      - "{{ inventory_hostname }}"
+      - -o
+      - jsonpath={.status.conditions[?(@.type=="Ready")].status}
+  delegate_to: "{{ groups['k3s_server'][0] }}"
+  register: k3s_node_ready
+  until: k3s_node_ready.stdout == "True"
+  retries: "{{ k3s_node_ready_retries }}"
+  delay: "{{ k3s_node_ready_delay }}"
+  changed_when: false
+  when: not ansible_check_mode
