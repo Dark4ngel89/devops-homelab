@@ -17,7 +17,7 @@ flowchart LR
     k3s -->|pull image| ghcr
     prom[Prometheus] -->|scrape /metrics| k3s
     grafana[Grafana] --> prom
-    ansible[Ansible din WSL2] -->|SSH| vm[VM Rocky/Alma<br/>Hyper-V]
+    ansible[Ansible din WSL2] -->|SSH| vm[2 VM Rocky Hyper-V<br/>k3s-01 server, k3s-02 agent]
     vm --- k3s
 ```
 
@@ -26,7 +26,7 @@ flowchart LR
 | Rol | Ce rulează |
 |---|---|
 | Workstation | Windows 11 + WSL2 Ubuntu 24.04 (6 GB RAM, 4 vCPU, `networkingMode=mirrored`): Docker Engine, kubectl, Helm 4, gh, Ansible (pipx) |
-| Cluster | VM Hyper-V `k3s-01`: Rocky Linux 9.8, 4 vCPU, 8 GB RAM statică, IP static `192.168.100.10` pe switch Internal + NAT, K3S v1.36.5 (canal stable), SELinux Enforcing, firewalld activ |
+| Cluster | 2 VM-uri Hyper-V Rocky Linux 9.8 pe switch Internal + NAT, K3S v1.36.5 (canal stable), SELinux Enforcing, firewalld activ: `k3s-01` server (4 vCPU, 8 GB, `192.168.100.10`) și `k3s-02` agent (2 vCPU, 6 GB, `192.168.100.11`), configurate cu Ansible |
 
 ## Structură
 
@@ -49,7 +49,7 @@ flowchart LR
 - [x] 5. Helm chart
 - [x] 6. ArgoCD (GitOps, auto-sync, self-heal)
 - [x] 7. Monitoring (kube-prometheus-stack, ServiceMonitor, dashboard, alertă)
-- [ ] 8. Ansible: provisioning VM + K3S
+- [x] 8. Ansible: provisioning VM + K3S
 - [ ] 9. Jenkins (opțional)
 - [ ] 10. Incidente simulate + post-mortems
 
@@ -168,6 +168,25 @@ flowchart LR
 - **Label-ul `helm.sh/chart` e și pe pod template:** orice bump de versiune a chart-ului repornește pod-urile, chiar dacă aplicația nu s-a schimbat.
 - **`yq -i` din CI a șters rândurile goale** din `values.yaml`. Rescrie YAML-ul din date, iar rândurile goale nu fac parte din date. Alternative: `sed` țintit sau un fișier separat doar pentru tag.
 
+### Faza 8: Ansible și clusterul multi-node
+- **Al doilea nod în loc de reinstalarea primului:** `k3s-02` (agent) intră în clusterul existent, iar pe `k3s-01` playbook-ul rulează întâi cu `--check --diff`. Am evitat să șterg ArgoCD și monitoring-ul și am câștigat un cluster cu 2 noduri.
+- **Bootstrap manual minim:** rețea, user `wheel`, cheie SSH și checkpoint `02-clean-os`. Restul e în playbook. Timezone-ul greșit și kdump activ au rămas intenționat ca drift pe care Ansible îl corectează.
+- **Structura:** `ansible.cfg` cu căi relative, inventar pe grupuri de rol (`k3s_server`, `k3s_agent`), `group_vars` pe niveluri, roluri `common` → `ssh_hardening` → `firewall` → `k3s`. Colecțiile sunt fixate în `requirements.yml`.
+- **Precedența variabilelor:** role `defaults` < `group_vars/all` < `group_vars/<grup>` < `host_vars` < play vars < role `vars` < `-e`. Valorile implicite stau în `defaults/`; nu folosesc `vars/` și nici `set_fact` pentru configurare. Variabilele au prefixul rolului (`common_`, `firewall_`).
+- **Listele nu se combină între `group_vars`, se înlocuiesc.** Serverul are nevoie de porturile clusterului plus 6443, deci am două variabile: `firewall_public_ports + firewall_extra_public_ports`. O redefinire a listei în `k3s_server.yml` ar fi șters 80/443 fără nicio eroare.
+- **Ordinea prin play-uri:** OS pe toate nodurile → server → agenți. Agentul folosește token-ul **înregistrat pe alt host** (`hostvars[server]`), deci serverul trebuie să ruleze întâi. Cu `--limit k3s-02` token-ul nu există, iar un `assert` oprește rularea cu un mesaj clar în loc de o eroare obscură.
+- **Token-ul nu stă în Git:** citit la rulare cu `slurp`, `no_log: true`, `diff: false` pe template (altfel `--diff` l-ar afișa în clar). K3S îl maschează și în annotation-ul nodului.
+- **Idempotență:** fiecare rol ajunge la `changed=0` la a doua rulare. `command` raportează mereu `changed`, deci comenzile care doar citesc au `changed_when: false`. Installer-ul k3s rulează doar dacă versiunea instalată diferă, așa că un upgrade înseamnă schimbarea `k3s_version`.
+- **Configurare ≠ patching:** ansible-lint a respins `state: latest` în rol (`package-latest`). Update-ul de pachete stă în `patch.yml`, cu `serial: 1` și reboot doar când `needs-restarting -r` o cere. `site.yml` nu repornește niciodată o mașină.
+- **SSH hardening fără să-ți tai accesul:** `assert` pe `authorized_keys`, `validate: sshd -t -f %s` (fișierul invalid nu ajunge pe disc; testat într-un container Rocky), handler cu `reloaded`, nu `restarted`. Am dezactivat și GSSAPI.
+- **Handlers:** rulează o dată, la finalul play-ului, doar dacă un task a fost `changed`.
+- **Firewall:** porturi publice, porturi nod-la-nod ca rich rules doar din `192.168.100.0/24` (10250 kubelet, 8472/udp flannel VXLAN, 9100 node-exporter) și pod/service CIDR în zona `trusted`. Modulul e **aditiv**: nu șterge ce nu e declarat (`cockpit` a rămas deschis), spre deosebire de `prune` din ArgoCD.
+- **Drift găsit pe `k3s-01`:** la configurarea manuală lipseau `dnf-utils`, `tar` și `bash-completion`. Rolul descrie starea completă.
+- **`--check` are limite:** `command` e sărit în check mode, deci un dry-run curat nu garantează o rulare reală curată.
+- **Spread + PDB (chart 0.6.0):** `topologySpreadConstraints` pe `kubernetes.io/hostname`, `maxSkew: 1`, `ScheduleAnyway` (cu `DoNotSchedule`, pod-urile ar rămâne `Pending` exact când un nod lipsește), `matchLabelKeys: pod-template-hash`. PDB `maxUnavailable: 1` protejează doar la întreruperi voluntare (drain), nu la noduri căzute.
+- **`kubectl drain k3s-02`:** cordon, evacuare prin Eviction API cu PDB respectat, DaemonSet-uri ignorate; pod-urile au trecut pe `k3s-01`. După `uncordon` nu s-au întors: scheduler-ul decide doar la crearea pod-ului (reechilibrare automată = Descheduler).
+- **`k3s-01` nu se poate goli:** PVC-ul `local-path` al lui Prometheus are node affinity pe `k3s-01`, deci pod-ul evacuat ar rămâne `Pending`. În plus, un singur server = control plane fără HA. HA cere 3 servere (quorum etcd); 2 ar fi mai fragil decât 1.
+
 ## Greșeli făcute
 
 - **`wsl --install` a instalat doar platforma, nu și distribuția.** După restart, `wsl -l -v` arăta "no installed distributions". Diagnostic: `wsl --version` (platforma OK), `wsl --list --online` (catalogul OK), deci lipsea doar distro-ul. Fix: `wsl --install -d Ubuntu-24.04`. Lecție: verifici fiecare componentă separat, nu doar exit code-ul installer-ului.
@@ -188,3 +207,7 @@ flowchart LR
 - **`curl` cu `{...}` în URL** (`up{namespace="homelab"}`) n-a întors nimic: curl interpretează acoladele ca globbing, iar `-s` a ascuns eroarea. Fix: `-g` sau `--data-urlencode`. La depanare: `-sS`.
 - **Am verificat Alertmanager prea devreme**, când alerta era încă `pending`. Prometheus trimite la Alertmanager doar alertele `firing`.
 - **`kill %1` după un port-forward pornit cu `&`** a nimerit job-ul greșit, pentru că rămăsese un job mai vechi, iar port-forward-ul a rămas pornit. Mai sigur: `kill $!` (PID-ul ultimului proces din fundal).
+- **Am lipit o comandă în timp ce `git diff` era deschis în `less`.** Fiecare caracter a devenit o comandă de pager, iar `s` (din `docs`) a salvat diff-ul într-un fișier cu numele restului liniei. Fix: `rm -- <fișier>`. Lecție: `q` înainte de a lipi, sau `git --no-pager diff`.
+- **Fingerprint comparat dintr-un screenshot:** `2` și `Z` arată la fel în fontul consolei. Verificarea out-of-band se face text cu text (`grep` pe fingerprint), nu din ochi.
+- **`ansible-lint` nu găsea `community.general`:** pipx izolează fiecare aplicație, iar colecțiile veneau doar în venv-ul pachetului `ansible`. Dependența nu era declarată nicăieri. Fix: `requirements.yml` cu versiuni fixate, instalat cu `-p ~/.ansible/collections --force` (fără `--force`, `ansible-galaxy` spunea `Nothing to do`, pentru că vedea colecția în propriul venv).
+- **Verificarea de nod Ready a eșuat de 30 de ori, deși nodul era Ready.** `rc: 1` arăta că eșua comanda, nu condiția. `cmd:` din output a arătat cauza: `command` cu string desparte argumentele ca un shell și a eliminat ghilimelele din jsonpath (`@.type==Ready`). Fix: `argv`. Lecție: un retry nu repară o comandă greșită; citești `rc` și `stderr` înainte să aștepți mai mult.
