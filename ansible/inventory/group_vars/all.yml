@@ -1,0 +1,5 @@
+# Valabil pentru toate host-urile. Fără secrete aici: parola de sudo se dă la rulare (-K).
+ansible_user: razvan
+ansible_ssh_private_key_file: ~/.ssh/homelab_ed25519
+
+timezone: Europe/Bucharest

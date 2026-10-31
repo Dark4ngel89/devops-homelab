@@ -1,0 +1,9 @@
+# Valabil pentru toate nodurile clusterului (server + agent).
+k3s_version: v1.36.5+k3s1
+
+# Adresa la care agenții se conectează la server. Calculată din inventar, nu scrisă de mână:
+# dacă serverul își schimbă IP-ul, se schimbă într-un singur loc.
+k3s_server_ip: "{{ hostvars[groups['k3s_server'][0]]['ansible_host'] }}"
+
+k3s_pod_cidr: 10.42.0.0/16
+k3s_service_cidr: 10.43.0.0/16
