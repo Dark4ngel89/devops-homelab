@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Stage 1: builder - instalează dependențele într-un venv izolat ----
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 
 # ---- Stage 2: runtime - doar ce trebuie ca să ruleze aplicația ----
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
